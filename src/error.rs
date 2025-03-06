@@ -19,4 +19,6 @@ pub enum RetumiError {
     JsExecError(String),
     #[error("error while serializing object to JSON: {0}")]
     SerializeError(#[from] serde_json::Error),
+    #[error("error while rendering: {0}")]
+    RenderError(#[from] html2text::Error),
 }

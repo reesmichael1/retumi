@@ -1,19 +1,27 @@
 #![feature(macro_metavar_expr)]
 
 use crossbeam::channel;
-use html5ever::tendril::TendrilSink;
-use html5ever::ParseOpts;
-use markup5ever_rcdom::RcDom;
+use html2text::render::PlainDecorator;
+use html2text::{config::Config, RcDom};
 
 use crate::error::RetumiError;
 use crate::js::{EngineContext, JsMessage, WorkerMsg};
 
+mod doc;
 mod error;
 mod js;
 
+pub fn render(dom: &RcDom, config: &Config<PlainDecorator>) -> Result<String, RetumiError> {
+    let tree = config.dom_to_render_tree(dom)?;
+    let rendered = config.render_to_string(tree, 120)?;
+    Ok(rendered)
+}
+
 pub async fn run_main() -> Result<(), RetumiError> {
-    let html = std::fs::read_to_string("demo/hello.html")?;
-    let mut dom = html5ever::parse_document(RcDom::default(), ParseOpts::default()).one(html);
+    let config = html2text::config::plain();
+
+    let file = std::fs::File::open("demo/hello.html")?;
+    let mut dom = config.parse_html(file)?;
 
     let (msg_tx, msg_rx) = channel::unbounded::<JsMessage>();
     let (worker_tx, worker_rx) = channel::unbounded::<WorkerMsg>();
@@ -33,32 +41,21 @@ pub async fn run_main() -> Result<(), RetumiError> {
             })?
     };
 
+    let scripts = doc::extract_scripts(&dom);
+
     let mut context = EngineContext::new();
-    let src = std::fs::read_to_string("demo/hello.js")?;
     js::exec(
         &mut dom,
         &mut context,
         msg_rx.clone(),
         worker_tx.clone(),
-        String::from("let a = 1; console.log(b)"),
-    );
-    js::exec(
-        &mut dom,
-        &mut context,
-        msg_rx.clone(),
-        worker_tx.clone(),
-        src,
-    );
-    js::exec(
-        &mut dom,
-        &mut context,
-        msg_rx.clone(),
-        worker_tx.clone(),
-        String::from("console.log('hi')"),
+        doc::contents(&scripts[0]),
     );
 
     worker_tx.send(WorkerMsg::Shutdown)?;
     js_handle.join().unwrap()?;
 
+    let rendered = render(&dom, &config)?;
+    println!("{rendered}");
     Ok(())
 }

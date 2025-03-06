@@ -2,9 +2,10 @@ use std::rc::Rc;
 
 use boa_engine::{Context, JsError, JsValue, NativeFunction, Source};
 use crossbeam::channel::{Receiver, Sender};
+use html2text::markup5ever_rcdom::{Handle, Node, NodeData};
+use html2text::RcDom;
 use html5ever::local_name;
 use html5ever::tree_builder::TreeSink;
-use markup5ever_rcdom::{Handle, Node, NodeData, RcDom};
 
 use crate::error::RetumiError;
 
@@ -15,6 +16,7 @@ pub enum JsMessage {
     QuerySelector(String),
     GetAttribute(usize, String),
     SetAttribute(usize, String, String),
+    SetText(usize, String),
     Done,
 }
 
@@ -136,6 +138,12 @@ fn initialize_context(
         jsval_to_string,
         jsval_to_string
     );
+    js_func!(
+        "setTextInner",
+        JsMessage::SetText,
+        jsval_to_int,
+        jsval_to_string
+    );
 
     let runtime_js = "
     console = { log: function(x) { logInner(String(x)) } }
@@ -151,6 +159,10 @@ fn initialize_context(
 
         setAttribute(attr, val) {
             return setAttributeInner(this.handle, attr, val);
+        }
+
+        set innerText(text) {
+            return setTextInner(this.handle, text);
         }
     }
 
@@ -226,7 +238,7 @@ pub fn exec_raw(
     loop {
         match rx.recv()? {
             JsMessage::Print(msg) => {
-                println!("{msg}");
+                println!("[JS console] {msg}");
                 tx.send(WorkerMsg::Response(serde_json::to_value(None::<()>)?))?;
             }
             JsMessage::GetElementById(id) => {
@@ -323,6 +335,29 @@ pub fn exec_raw(
                                 if attr.name.local == name {
                                     attr.value = value.into();
                                     break;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    tx.send(WorkerMsg::Response(serde_json::to_value(None::<()>)?))?;
+                } else {
+                    tx.send(WorkerMsg::Error(serde_json::to_value(
+                        "unrecognized handle",
+                    )?))?;
+                }
+            }
+            JsMessage::SetText(handle, text) => {
+                if let Some(node) = js_state.get_element_mut(handle) {
+                    match &node.data {
+                        NodeData::Element { .. } => {
+                            for child in node.children.borrow_mut().iter_mut() {
+                                match &child.data {
+                                    NodeData::Text { contents } => {
+                                        let mut text_node = contents.borrow_mut();
+                                        *text_node = text.clone().into();
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
