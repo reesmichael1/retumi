@@ -9,6 +9,7 @@ fn main() {
         .block_on(async {
             if let Err(err) = run_main().await {
                 log::error!("{err}");
+                std::process::exit(1);
             }
         })
 }

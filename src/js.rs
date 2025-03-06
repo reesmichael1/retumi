@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use boa_engine::{Context, JsValue, NativeFunction, Source};
+use boa_engine::{Context, JsError, JsValue, NativeFunction, Source};
 use crossbeam::channel::{Receiver, Sender};
 use html5ever::local_name;
 use html5ever::tree_builder::TreeSink;
@@ -21,6 +21,7 @@ pub enum JsMessage {
 #[derive(Debug, Clone)]
 pub enum WorkerMsg {
     Response(serde_json::Value),
+    Error(serde_json::Value),
     Execute(String),
     Shutdown,
 }
@@ -98,7 +99,10 @@ fn initialize_context(
                             WorkerMsg::Response(res) => {
                                 Ok(JsValue::from_json(&res, ctx).unwrap())
                             },
-                            _ => unreachable!(),
+                            WorkerMsg::Error(err) => {
+                                Err(JsError::from_opaque(JsValue::from_json(&err, ctx).unwrap()))
+                            }
+                            WorkerMsg::Execute(_) | WorkerMsg::Shutdown => unreachable!(),
                         }
                     }),
                 )
@@ -178,17 +182,17 @@ pub fn run_worker(rx: Receiver<WorkerMsg>, tx: Sender<JsMessage>) -> Result<(), 
 
     loop {
         let msg = rx.recv()?;
-        match msg {
+        match &msg {
             WorkerMsg::Execute(src) => {
                 if let Err(err) = ctx.eval(Source::from_bytes(&src)) {
-                    log::error!("error while executing JavaScript: {err}");
+                    log::error!("in JS execution: {err}");
                 }
                 tx.send(JsMessage::Done)?;
             }
-            WorkerMsg::Response(_) => {
+            WorkerMsg::Response(_) | WorkerMsg::Error(_) => {
                 break Err(RetumiError::JsExecError(
-                    "got unexpected response message".to_string(),
-                ))
+                    "got unexpected worker response".to_string(),
+                ));
             }
             WorkerMsg::Shutdown => {
                 tx.send(JsMessage::Done)?;
@@ -199,6 +203,18 @@ pub fn run_worker(rx: Receiver<WorkerMsg>, tx: Sender<JsMessage>) -> Result<(), 
 }
 
 pub fn exec(
+    dom: &mut RcDom,
+    js_state: &mut EngineContext,
+    rx: Receiver<JsMessage>,
+    tx: Sender<WorkerMsg>,
+    code: String,
+) {
+    if let Err(err) = exec_raw(dom, js_state, rx, tx, code) {
+        log::error!("{err}");
+    }
+}
+
+pub fn exec_raw(
     dom: &mut RcDom,
     js_state: &mut EngineContext,
     rx: Receiver<JsMessage>,
@@ -274,8 +290,8 @@ pub fn exec(
                 tx.send(WorkerMsg::Response(serde_json::to_value(result)?))?;
             }
             JsMessage::GetAttribute(handle, name) => {
-                let mut sent = false;
                 if let Some(node) = js_state.get_element(handle) {
+                    let mut sent = false;
                     match &node.data {
                         NodeData::Element { attrs, .. } => {
                             for attr in attrs.borrow().iter() {
@@ -289,12 +305,14 @@ pub fn exec(
                         }
                         _ => {}
                     }
-                } else {
-                    // TODO: actually have good error handling
-                }
 
-                if !sent {
-                    tx.send(WorkerMsg::Response(serde_json::to_value(None::<()>)?))?;
+                    if !sent {
+                        tx.send(WorkerMsg::Response(serde_json::to_value(None::<()>)?))?;
+                    }
+                } else {
+                    tx.send(WorkerMsg::Error(serde_json::to_value(
+                        "unrecognized handle",
+                    )?))?;
                 }
             }
             JsMessage::SetAttribute(handle, name, value) => {
@@ -310,9 +328,12 @@ pub fn exec(
                         }
                         _ => {}
                     }
+                    tx.send(WorkerMsg::Response(serde_json::to_value(None::<()>)?))?;
+                } else {
+                    tx.send(WorkerMsg::Error(serde_json::to_value(
+                        "unrecognized handle",
+                    )?))?;
                 }
-
-                tx.send(WorkerMsg::Response(serde_json::to_value(None::<()>)?))?;
             }
             JsMessage::Done => break Ok(()),
         }

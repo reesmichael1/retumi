@@ -8,4 +8,6 @@ console.log(ps);
 console.log(el.getAttribute('id'));
 el.setAttribute('id', 'got');
 console.log(el.getAttribute('id'));
+let bad = new Node(18);
+console.log(bad.getAttribute('uh-oh'));
 console.log(document.getElementById('dne'));
