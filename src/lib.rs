@@ -18,11 +18,37 @@ pub async fn run_main() -> Result<(), RetumiError> {
     let (msg_tx, msg_rx) = channel::unbounded::<JsMessage>();
     let (worker_tx, worker_rx) = channel::unbounded::<WorkerMsg>();
 
-    std::thread::spawn(|| js::run(worker_rx, msg_tx));
+    {
+        let rx = worker_rx.clone();
+        let tx = msg_tx.clone();
+        std::thread::Builder::new()
+            .name(String::from("js_context"))
+            .spawn(move || {
+                if let Err(err) = js::run_worker(rx.clone(), tx.clone()) {
+                    log::error!("{err}");
+                    return Err(err);
+                }
+
+                Ok(())
+            })?;
+    }
 
     let mut context = EngineContext::new();
     let src = std::fs::read_to_string("demo/hello.js")?;
-    js::exec(&mut dom, &mut context, msg_rx, worker_tx.clone(), src).unwrap();
+    js::exec(
+        &mut dom,
+        &mut context,
+        msg_rx.clone(),
+        worker_tx.clone(),
+        String::from("let a = 1;"),
+    )?;
+    js::exec(
+        &mut dom,
+        &mut context,
+        msg_rx.clone(),
+        worker_tx.clone(),
+        src,
+    )?;
 
     worker_tx.send(WorkerMsg::Shutdown)?;
 

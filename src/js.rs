@@ -79,6 +79,7 @@ fn initialize_context(
     rx: Receiver<WorkerMsg>,
     tx: Sender<JsMessage>,
 ) -> Result<Context, RetumiError> {
+    log::info!("starting JavaScript engine initialization");
     let mut ctx = Context::default();
 
     macro_rules! js_func {
@@ -101,8 +102,9 @@ fn initialize_context(
                         }
                     }),
                 )
-                .map_err(|_| RetumiError::JsInitializeError)?;
+                .map_err(|err| RetumiError::JsInitializeError(err.to_string()))?;
             }
+            log::info!("registered function for {}", $name);
         };
     }
 
@@ -165,21 +167,23 @@ fn initialize_context(
     }";
 
     ctx.eval(Source::from_bytes(runtime_js))
-        .map_err(|_| RetumiError::JsInitializeError)?;
+        .map_err(|err| RetumiError::JsInitializeError(err.to_string()))?;
 
+    log::info!("successfully initialized JavaScript engine");
     Ok(ctx)
 }
 
-pub fn run(rx: Receiver<WorkerMsg>, tx: Sender<JsMessage>) -> Result<(), RetumiError> {
+pub fn run_worker(rx: Receiver<WorkerMsg>, tx: Sender<JsMessage>) -> Result<(), RetumiError> {
     let mut ctx = initialize_context(rx.clone(), tx.clone())?;
 
     loop {
         let msg = rx.recv()?;
         match msg {
             WorkerMsg::Execute(src) => {
-                ctx.eval(Source::from_bytes(&src))
-                    .map_err(|err| RetumiError::JsExecError(err.to_string()))?;
-                tx.send(JsMessage::Done).unwrap();
+                if let Err(err) = ctx.eval(Source::from_bytes(&src)) {
+                    log::error!("error while executing JavaScript: {err}");
+                }
+                tx.send(JsMessage::Done)?;
             }
             WorkerMsg::Response(_) => {
                 break Err(RetumiError::JsExecError(
@@ -201,7 +205,7 @@ pub fn exec(
     tx: Sender<WorkerMsg>,
     code: String,
 ) -> Result<(), RetumiError> {
-    tx.send(WorkerMsg::Execute(code)).unwrap();
+    tx.send(WorkerMsg::Execute(code))?;
 
     loop {
         match rx.recv()? {

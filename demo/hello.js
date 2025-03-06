@@ -1,4 +1,6 @@
 console.log("Hello, world!");
+// a is defined earlier in a runtime call to js::exec
+console.log(a + 2);
 let el = document.getElementById('getme');
 console.log(el);
 let ps = document.querySelectorAll('p');
