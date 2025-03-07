@@ -1,28 +1,18 @@
 #![feature(macro_metavar_expr)]
 
 use crossbeam::channel;
-use html2text::render::PlainDecorator;
-use html2text::{config::Config, RcDom};
+use tuirealm::Update;
 
 use crate::error::RetumiError;
-use crate::js::{EngineContext, JsMessage, WorkerMsg};
+use crate::js::{JsMessage, WorkerMsg};
 
+mod browser;
 mod doc;
 mod error;
 mod js;
-
-pub fn render(dom: &RcDom, config: &Config<PlainDecorator>) -> Result<String, RetumiError> {
-    let tree = config.dom_to_render_tree(dom)?;
-    let rendered = config.render_to_string(tree, 120)?;
-    Ok(rendered)
-}
+mod ui;
 
 pub async fn run_main() -> Result<(), RetumiError> {
-    let config = html2text::config::plain();
-
-    let file = std::fs::File::open("demo/hello.html")?;
-    let mut dom = config.parse_html(file)?;
-
     let (msg_tx, msg_rx) = channel::unbounded::<JsMessage>();
     let (worker_tx, worker_rx) = channel::unbounded::<WorkerMsg>();
 
@@ -41,21 +31,39 @@ pub async fn run_main() -> Result<(), RetumiError> {
             })?
     };
 
-    let scripts = doc::extract_scripts(&dom);
+    let mut model = ui::Model::new(msg_rx, worker_tx.clone());
+    model.terminal.enable_raw_mode().unwrap();
+    model.terminal.enter_alternate_screen().unwrap();
 
-    let mut context = EngineContext::new();
-    js::exec(
-        &mut dom,
-        &mut context,
-        msg_rx.clone(),
-        worker_tx.clone(),
-        doc::contents(&scripts[0]),
-    );
+    while !model.quit {
+        match model.app.tick(tuirealm::PollStrategy::Once) {
+            Err(err) => {
+                eprintln!("{err}");
+                break;
+            }
+            Ok(messages) => {
+                if messages.len() > 0 {
+                    model.redraw = true;
+                    for msg in messages.into_iter() {
+                        let mut msg = Some(msg);
+                        while msg.is_some() {
+                            msg = model.update(msg);
+                        }
+                    }
+                }
+            }
+        }
+        if model.redraw {
+            model.redraw = false;
+            model.view();
+        }
+    }
+
+    let _ = model.terminal.leave_alternate_screen();
+    let _ = model.terminal.disable_raw_mode();
 
     worker_tx.send(WorkerMsg::Shutdown)?;
     js_handle.join().unwrap()?;
 
-    let rendered = render(&dom, &config)?;
-    println!("{rendered}");
     Ok(())
 }
