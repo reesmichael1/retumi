@@ -9,7 +9,7 @@ use tuirealm::ratatui::layout::{Constraint, Direction, Layout};
 use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalBridge};
 use tuirealm::{Application, AttrValue, Attribute, EventListenerCfg, Update};
 
-use super::components::{Page, UrlBar};
+use super::components::{ErrorBar, Page, UrlBar};
 use super::{Id, Msg};
 use crate::browser;
 
@@ -23,6 +23,7 @@ where
     pub terminal: TerminalBridge<T>,
     pub msg_rx: Receiver<JsMessage>,
     pub worker_tx: Sender<WorkerMsg>,
+    has_error: bool,
 }
 
 impl Model<CrosstermTerminalAdapter> {
@@ -37,6 +38,9 @@ impl Model<CrosstermTerminalAdapter> {
         assert!(app
             .mount(Id::Page, Box::new(Page::default()), vec![])
             .is_ok());
+        assert!(app
+            .mount(Id::ErrorBar, Box::new(ErrorBar::default()), vec![])
+            .is_ok());
         assert!(app.active(&Id::UrlBar).is_ok());
 
         Self {
@@ -46,6 +50,7 @@ impl Model<CrosstermTerminalAdapter> {
             terminal: TerminalBridge::init_crossterm().expect("failed to initialize terminal"),
             msg_rx,
             worker_tx,
+            has_error: false,
         }
     }
 }
@@ -58,13 +63,21 @@ where
         assert!(self
             .terminal
             .draw(|f| {
+                let mut constraints = vec![Constraint::Length(3), Constraint::Fill(1)];
+                if self.has_error {
+                    constraints.push(Constraint::Length(1));
+                }
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .margin(1)
-                    .constraints([Constraint::Length(3), Constraint::Fill(1)])
+                    .constraints(&constraints)
                     .split(f.area());
                 self.app.view(&Id::UrlBar, f, chunks[0]);
                 self.app.view(&Id::Page, f, chunks[1]);
+
+                if self.has_error {
+                    self.app.view(&Id::ErrorBar, f, chunks[2]);
+                }
             })
             .is_ok());
     }
@@ -88,9 +101,23 @@ where
                     None
                 }
                 Msg::UrlSubmit(url) => {
-                    let contents =
-                        browser::browse(url, self.msg_rx.clone(), self.worker_tx.clone()).unwrap();
-                    Some(Msg::PageLoad(contents))
+                    match browser::browse(url, self.msg_rx.clone(), self.worker_tx.clone()) {
+                        Ok(contents) => {
+                            self.has_error = false;
+
+                            assert!(self
+                                .app
+                                .attr(
+                                    &Id::ErrorBar,
+                                    Attribute::Text,
+                                    AttrValue::String(String::new()),
+                                )
+                                .is_ok());
+
+                            Some(Msg::PageLoad(contents))
+                        }
+                        Err(err) => Some(Msg::FillError(err.to_string())),
+                    }
                 }
                 Msg::PageLoad(contents) => {
                     assert!(self.app.active(&Id::Page).is_ok());
@@ -104,6 +131,18 @@ where
                             AttrValue::Payload(PropPayload::Vec(
                                 lines.iter().cloned().map(PropValue::TextSpan).collect(),
                             )),
+                        )
+                        .is_ok());
+                    None
+                }
+                Msg::FillError(err) => {
+                    self.has_error = true;
+                    assert!(self
+                        .app
+                        .attr(
+                            &Id::ErrorBar,
+                            Attribute::Text,
+                            AttrValue::String(err.into()),
                         )
                         .is_ok());
                     None

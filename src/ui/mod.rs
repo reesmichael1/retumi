@@ -10,11 +10,13 @@ pub enum Msg {
     UrlBlur,
     UrlSubmit(String),
     PageLoad(String),
+    FillError(String),
     PageBlur,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum Id {
     UrlBar,
+    ErrorBar,
     Page,
 }
