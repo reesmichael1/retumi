@@ -23,6 +23,8 @@ where
     pub terminal: TerminalBridge<T>,
     pub msg_rx: Receiver<JsMessage>,
     pub worker_tx: Sender<WorkerMsg>,
+    pub tok_rx: tokio::sync::mpsc::Receiver<Msg>,
+    tok_tx: tokio::sync::mpsc::Sender<Msg>,
     has_error: bool,
 }
 
@@ -43,6 +45,8 @@ impl Model<CrosstermTerminalAdapter> {
             .is_ok());
         assert!(app.active(&Id::UrlBar).is_ok());
 
+        let (tok_tx, tok_rx) = tokio::sync::mpsc::channel(16);
+
         Self {
             app,
             quit: false,
@@ -50,6 +54,8 @@ impl Model<CrosstermTerminalAdapter> {
             terminal: TerminalBridge::init_crossterm().expect("failed to initialize terminal"),
             msg_rx,
             worker_tx,
+            tok_rx,
+            tok_tx,
             has_error: false,
         }
     }
@@ -81,6 +87,18 @@ where
             })
             .is_ok());
     }
+
+    fn do_load_page(&mut self, url: String) {
+        let tx = self.tok_tx.clone();
+        let msg_rx = self.msg_rx.clone();
+        let worker_tx = self.worker_tx.clone();
+        tokio::spawn(async move {
+            match browser::browse(url, msg_rx.clone(), worker_tx.clone()).await {
+                Ok(contents) => tx.send(Msg::PageLoad(contents)).await.unwrap(),
+                Err(err) => tx.send(Msg::FillError(err.to_string())).await.unwrap(),
+            }
+        });
+    }
 }
 
 impl<T> Update<Msg> for Model<T>
@@ -101,26 +119,12 @@ where
                     None
                 }
                 Msg::UrlSubmit(url) => {
-                    match browser::browse(url, self.msg_rx.clone(), self.worker_tx.clone()) {
-                        Ok(contents) => {
-                            self.has_error = false;
-
-                            assert!(self
-                                .app
-                                .attr(
-                                    &Id::ErrorBar,
-                                    Attribute::Text,
-                                    AttrValue::String(String::new()),
-                                )
-                                .is_ok());
-
-                            Some(Msg::PageLoad(contents))
-                        }
-                        Err(err) => Some(Msg::FillError(err.to_string())),
-                    }
+                    self.do_load_page(url);
+                    None
                 }
                 Msg::PageLoad(contents) => {
                     assert!(self.app.active(&Id::Page).is_ok());
+                    self.has_error = false;
                     let lines: Vec<TextSpan> =
                         contents.lines().map(|s| s.to_string().into()).collect();
                     assert!(self

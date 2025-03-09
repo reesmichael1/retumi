@@ -21,4 +21,6 @@ pub enum RetumiError {
     SerializeError(#[from] serde_json::Error),
     #[error("error while rendering: {0}")]
     RenderError(#[from] html2text::Error),
+    #[error("error while making HTTP request: {0}")]
+    ReqwestError(#[from] reqwest::Error),
 }

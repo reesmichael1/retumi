@@ -14,25 +14,26 @@ fn render(dom: &RcDom, config: &Config<PlainDecorator>) -> Result<String, Retumi
     Ok(rendered)
 }
 
-pub fn browse(
-    path: String,
+pub async fn browse(
+    url: String,
     msg_rx: Receiver<JsMessage>,
     worker_tx: Sender<WorkerMsg>,
 ) -> Result<String, RetumiError> {
     let config = html2text::config::plain();
-    let file = std::fs::File::open(path)?;
-    let mut dom = config.parse_html(file)?;
-
-    let scripts = doc::extract_scripts(&dom);
+    let content = reqwest::get(url).await?.text().await.unwrap();
+    let mut dom = config.parse_html(std::io::Cursor::new(content))?;
 
     let mut context = EngineContext::new();
-    js::exec(
-        &mut dom,
-        &mut context,
-        msg_rx.clone(),
-        worker_tx.clone(),
-        doc::contents(&scripts[0]),
-    );
+    let scripts = doc::extract_scripts(&dom);
+    for script in scripts {
+        js::exec(
+            &mut dom,
+            &mut context,
+            msg_rx.clone(),
+            worker_tx.clone(),
+            doc::contents(&script),
+        );
+    }
 
     let rendered = render(&dom, &config)?;
     Ok(rendered)

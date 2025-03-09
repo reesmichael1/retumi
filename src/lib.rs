@@ -36,6 +36,14 @@ pub async fn run_main() -> Result<(), RetumiError> {
     model.terminal.enter_alternate_screen().unwrap();
 
     while !model.quit {
+        if !model.tok_rx.is_empty() {
+            model.redraw = true;
+            let mut msg = Some(model.tok_rx.recv().await.unwrap());
+            while msg.is_some() {
+                msg = model.update(msg);
+            }
+        }
+
         match model.app.tick(tuirealm::PollStrategy::Once) {
             Err(err) => {
                 eprintln!("{err}");
