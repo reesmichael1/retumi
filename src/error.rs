@@ -2,6 +2,7 @@ use crate::js::{JsMessage, WorkerMsg};
 
 use crossbeam::channel::{RecvError, SendError};
 use thiserror::Error;
+use tuirealm::terminal::TerminalError;
 
 #[derive(Debug, Error)]
 pub enum RetumiError {
@@ -23,4 +24,8 @@ pub enum RetumiError {
     RenderError(#[from] html2text::Error),
     #[error("error while making HTTP request: {0}")]
     ReqwestError(#[from] reqwest::Error),
+    #[error("error while manipulating terminal state: {0}")]
+    TerminalError(#[from] TerminalError),
+    #[error("error while sending/receiving to/from channel")]
+    ChannelError,
 }

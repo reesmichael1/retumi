@@ -3,7 +3,7 @@ mod model;
 
 pub use model::Model;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
     None,
     Quit,

@@ -4,8 +4,9 @@ use tui_realm_stdlib::Input;
 use tuirealm::command::{Cmd, CmdResult, Direction, Position};
 use tuirealm::event::{Key, KeyEvent, KeyModifiers};
 use tuirealm::props::{Alignment, Color, InputType};
-use tuirealm::{Component, Event, MockComponent, NoUserEvent};
+use tuirealm::{Component, Event, MockComponent};
 
+use crate::event::RetumiEvent;
 use crate::ui::Msg;
 
 #[derive(MockComponent)]
@@ -13,8 +14,8 @@ pub struct UrlBar {
     component: Input,
 }
 
-impl Component<Msg, NoUserEvent> for UrlBar {
-    fn on(&mut self, ev: Event<NoUserEvent>) -> Option<Msg> {
+impl Component<Msg, RetumiEvent> for UrlBar {
+    fn on(&mut self, ev: Event<RetumiEvent>) -> Option<Msg> {
         let _ = match ev {
             Event::Keyboard(KeyEvent {
                 code: Key::Left, ..

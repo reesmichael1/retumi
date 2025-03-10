@@ -1,70 +1,110 @@
 use std::time::Duration;
 
+use crate::error::RetumiError;
+use crate::event::{HttpClient, RetumiEvent};
 use crate::js::{JsMessage, WorkerMsg};
 
 use crossbeam::channel::{Receiver, Sender};
-use tuirealm::event::NoUserEvent;
 use tuirealm::props::{PropPayload, PropValue, TextSpan};
 use tuirealm::ratatui::layout::{Constraint, Direction, Layout};
 use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalBridge};
-use tuirealm::{Application, AttrValue, Attribute, EventListenerCfg, Update};
+use tuirealm::{
+    Application, AttrValue, Attribute, EventListenerCfg, Sub, SubClause, SubEventClause, Update,
+};
 
 use super::components::{ErrorBar, Page, UrlBar};
 use super::{Id, Msg};
-use crate::browser;
 
 pub struct Model<T>
 where
     T: TerminalAdapter,
 {
-    pub app: Application<Id, Msg, NoUserEvent>,
+    pub app: Application<Id, Msg, RetumiEvent>,
     pub quit: bool,
     pub redraw: bool,
     pub terminal: TerminalBridge<T>,
-    pub msg_rx: Receiver<JsMessage>,
-    pub worker_tx: Sender<WorkerMsg>,
-    pub tok_rx: tokio::sync::mpsc::Receiver<Msg>,
-    tok_tx: tokio::sync::mpsc::Sender<Msg>,
+    http_tx: Sender<Msg>,
     has_error: bool,
 }
 
 impl Model<CrosstermTerminalAdapter> {
     pub fn new(msg_rx: Receiver<JsMessage>, worker_tx: Sender<WorkerMsg>) -> Self {
+        let (http_tx, http_rx) = crossbeam::channel::bounded(16);
+        let (content_tx, content_rx) = crossbeam::channel::bounded(16);
+
         let mut app = Application::init(
-            EventListenerCfg::default().crossterm_input_listener(Duration::from_millis(10), 10),
+            EventListenerCfg::default()
+                .crossterm_input_listener(Duration::from_millis(10), 10)
+                .add_port(
+                    Box::new(HttpClient::new(http_rx, content_tx, msg_rx, worker_tx)),
+                    Duration::from_millis(10),
+                    10,
+                ),
         );
 
         assert!(app
             .mount(Id::UrlBar, Box::new(UrlBar::default()), vec![])
             .is_ok());
         assert!(app
-            .mount(Id::Page, Box::new(Page::default()), vec![])
+            .mount(
+                Id::Page,
+                Box::new(Page::new(content_rx)),
+                vec![Sub::new(
+                    SubEventClause::User(RetumiEvent::PageReady),
+                    SubClause::Always
+                )]
+            )
             .is_ok());
         assert!(app
             .mount(Id::ErrorBar, Box::new(ErrorBar::default()), vec![])
             .is_ok());
         assert!(app.active(&Id::UrlBar).is_ok());
 
-        let (tok_tx, tok_rx) = tokio::sync::mpsc::channel(16);
-
         Self {
             app,
             quit: false,
             redraw: true,
             terminal: TerminalBridge::init_crossterm().expect("failed to initialize terminal"),
-            msg_rx,
-            worker_tx,
-            tok_rx,
-            tok_tx,
+            http_tx,
             has_error: false,
         }
     }
-}
 
-impl<T> Model<T>
-where
-    T: TerminalAdapter,
-{
+    pub fn run(&mut self) -> Result<(), RetumiError> {
+        self.terminal.enable_raw_mode()?;
+        self.terminal.enter_alternate_screen()?;
+
+        while !self.quit {
+            match self.app.tick(tuirealm::PollStrategy::Once) {
+                Err(err) => {
+                    eprintln!("{err}");
+                    break;
+                }
+                Ok(messages) => {
+                    if messages.len() > 0 {
+                        self.redraw = true;
+                        for msg in messages.into_iter() {
+                            let mut msg = Some(msg);
+                            while msg.is_some() {
+                                msg = self.update(msg);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.redraw {
+                self.redraw = false;
+                self.view();
+            }
+        }
+
+        self.terminal.leave_alternate_screen()?;
+        self.terminal.disable_raw_mode()?;
+
+        Ok(())
+    }
+
     pub fn view(&mut self) {
         assert!(self
             .terminal
@@ -88,23 +128,21 @@ where
             .is_ok());
     }
 
-    fn do_load_page(&mut self, url: String) {
-        let tx = self.tok_tx.clone();
-        let msg_rx = self.msg_rx.clone();
-        let worker_tx = self.worker_tx.clone();
-        tokio::spawn(async move {
-            match browser::browse(url, msg_rx.clone(), worker_tx.clone()).await {
-                Ok(contents) => tx.send(Msg::PageLoad(contents)).await.unwrap(),
-                Err(err) => tx.send(Msg::FillError(err.to_string())).await.unwrap(),
-            }
-        });
+    fn maybe_error(&self, res: Result<(), RetumiError>) -> Option<Msg> {
+        match res {
+            Ok(_) => None,
+            Err(err) => Some(Msg::FillError(err.to_string())),
+        }
+    }
+
+    fn do_load_page(&mut self, url: String) -> Result<(), RetumiError> {
+        self.http_tx
+            .send(Msg::UrlSubmit(url))
+            .map_err(|_| RetumiError::ChannelError)
     }
 }
 
-impl<T> Update<Msg> for Model<T>
-where
-    T: TerminalAdapter,
-{
+impl Update<Msg> for Model<CrosstermTerminalAdapter> {
     fn update(&mut self, msg: Option<Msg>) -> Option<Msg> {
         if let Some(msg) = msg {
             self.redraw = true;
@@ -119,8 +157,8 @@ where
                     None
                 }
                 Msg::UrlSubmit(url) => {
-                    self.do_load_page(url);
-                    None
+                    let res = self.do_load_page(url);
+                    self.maybe_error(res)
                 }
                 Msg::PageLoad(contents) => {
                     assert!(self.app.active(&Id::Page).is_ok());
