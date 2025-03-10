@@ -16,7 +16,6 @@ pub struct Page {
 impl Component<Msg, RetumiEvent> for Page {
     fn on(&mut self, ev: Event<RetumiEvent>) -> Option<Msg> {
         match ev {
-            Event::Keyboard(KeyEvent { code: Key::Esc, .. }) => Some(Msg::Quit),
             Event::Keyboard(KeyEvent { code: Key::Tab, .. }) => Some(Msg::PageBlur),
             Event::User(RetumiEvent::PageReady) => {
                 let contents = self.rx.recv().unwrap();

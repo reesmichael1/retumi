@@ -19,4 +19,5 @@ pub enum Id {
     UrlBar,
     ErrorBar,
     Page,
+    Closer,
 }

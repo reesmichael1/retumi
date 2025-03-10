@@ -45,7 +45,6 @@ impl Component<Msg, RetumiEvent> for UrlBar {
                 modifiers: KeyModifiers::SHIFT,
             }) => self.perform(Cmd::Type(ch)),
             Event::Keyboard(KeyEvent { code: Key::Tab, .. }) => return Some(Msg::UrlBlur),
-            Event::Keyboard(KeyEvent { code: Key::Esc, .. }) => return Some(Msg::Quit),
             Event::Keyboard(KeyEvent {
                 code: Key::Enter, ..
             }) => {

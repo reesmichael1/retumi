@@ -5,6 +5,7 @@ use crate::event::{HttpClient, RetumiEvent};
 use crate::js::{JsMessage, WorkerMsg};
 
 use crossbeam::channel::{Receiver, Sender};
+use tuirealm::event::{Key, KeyEvent, KeyModifiers};
 use tuirealm::props::{PropPayload, PropValue, TextSpan};
 use tuirealm::ratatui::layout::{Constraint, Direction, Layout};
 use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalBridge};
@@ -12,7 +13,7 @@ use tuirealm::{
     Application, AttrValue, Attribute, EventListenerCfg, Sub, SubClause, SubEventClause, Update,
 };
 
-use super::components::{ErrorBar, Page, UrlBar};
+use super::components::{Closer, ErrorBar, Page, UrlBar};
 use super::{Id, Msg};
 
 pub struct Model<T>
@@ -57,6 +58,19 @@ impl Model<CrosstermTerminalAdapter> {
             .is_ok());
         assert!(app
             .mount(Id::ErrorBar, Box::new(ErrorBar::default()), vec![])
+            .is_ok());
+        assert!(app
+            .mount(
+                Id::Closer,
+                Box::new(Closer::default()),
+                vec![Sub::new(
+                    SubEventClause::Keyboard(KeyEvent {
+                        code: Key::Esc,
+                        modifiers: KeyModifiers::NONE,
+                    }),
+                    SubClause::Always
+                )]
+            )
             .is_ok());
         assert!(app.active(&Id::UrlBar).is_ok());
 
