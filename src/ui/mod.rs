@@ -2,6 +2,7 @@ mod components;
 mod model;
 
 pub use model::Model;
+use tuirealm::props::TextSpan;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
@@ -9,7 +10,7 @@ pub enum Msg {
     Quit,
     UrlBlur,
     UrlSubmit(String),
-    PageLoad(String),
+    PageLoad(Vec<TextSpan>),
     FillError(String),
     PageBlur,
 }

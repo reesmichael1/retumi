@@ -6,7 +6,7 @@ use crate::js::{JsMessage, WorkerMsg};
 
 use crossbeam::channel::{Receiver, Sender};
 use tuirealm::event::{Key, KeyEvent, KeyModifiers};
-use tuirealm::props::{PropPayload, PropValue, TextSpan};
+use tuirealm::props::{PropPayload, PropValue};
 use tuirealm::ratatui::layout::{Constraint, Direction, Layout};
 use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalBridge};
 use tuirealm::{
@@ -37,7 +37,7 @@ impl Model<CrosstermTerminalAdapter> {
             EventListenerCfg::default()
                 .crossterm_input_listener(Duration::from_millis(10), 10)
                 .add_port(
-                    Box::new(HttpClient::new(http_rx, content_tx, msg_rx, worker_tx)),
+                    Box::new(HttpClient::new(http_rx, content_tx)),
                     Duration::from_millis(10),
                     10,
                 ),
@@ -49,7 +49,7 @@ impl Model<CrosstermTerminalAdapter> {
         assert!(app
             .mount(
                 Id::Page,
-                Box::new(Page::new(content_rx)),
+                Box::new(Page::new(content_rx, msg_rx, worker_tx)),
                 vec![Sub::new(
                     SubEventClause::User(RetumiEvent::PageReady),
                     SubClause::Always
@@ -177,15 +177,13 @@ impl Update<Msg> for Model<CrosstermTerminalAdapter> {
                 Msg::PageLoad(contents) => {
                     assert!(self.app.active(&Id::Page).is_ok());
                     self.has_error = false;
-                    let lines: Vec<TextSpan> =
-                        contents.lines().map(|s| s.to_string().into()).collect();
                     assert!(self
                         .app
                         .attr(
                             &Id::Page,
                             Attribute::Text,
                             AttrValue::Payload(PropPayload::Vec(
-                                lines.iter().cloned().map(PropValue::TextSpan).collect(),
+                                contents.into_iter().map(PropValue::TextSpan).collect()
                             )),
                         )
                         .is_ok());

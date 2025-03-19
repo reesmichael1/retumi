@@ -1,25 +1,39 @@
-use crossbeam::channel::Receiver;
+use crossbeam::channel::{Receiver, Sender};
 use tui_realm_stdlib::Textarea;
 use tuirealm::event::{Key, KeyEvent};
 use tuirealm::{Component, Event, MockComponent};
 
-use crate::error::RetumiError;
+use crate::browser::Browser;
 use crate::event::RetumiEvent;
+use crate::js::{JsMessage, WorkerMsg};
 use crate::ui::Msg;
 
 #[derive(MockComponent)]
 pub struct Page {
     component: Textarea,
-    rx: Receiver<Result<String, RetumiError>>,
+    rx: Receiver<String>,
+    browser: Browser,
 }
 
 impl Component<Msg, RetumiEvent> for Page {
     fn on(&mut self, ev: Event<RetumiEvent>) -> Option<Msg> {
         match ev {
             Event::Keyboard(KeyEvent { code: Key::Tab, .. }) => Some(Msg::PageBlur),
+            Event::Keyboard(KeyEvent {
+                code: Key::Char(' '),
+                ..
+            }) => {
+                let contents = self.browser.cycle_link().unwrap();
+                Some(Msg::PageLoad(contents))
+            }
+            Event::Keyboard(KeyEvent {
+                code: Key::Enter, ..
+            }) => self.browser.get_active_link().map(Msg::UrlSubmit),
             Event::User(RetumiEvent::PageReady) => {
                 let contents = self.rx.recv().unwrap();
-                match contents {
+                let rendered = self.browser.render_contents(&contents);
+
+                match rendered {
                     Ok(page) => Some(Msg::PageLoad(page)),
                     Err(err) => Some(Msg::FillError(err.to_string())),
                 }
@@ -30,10 +44,15 @@ impl Component<Msg, RetumiEvent> for Page {
 }
 
 impl Page {
-    pub fn new(rx: Receiver<Result<String, RetumiError>>) -> Self {
+    pub fn new(
+        rx: Receiver<String>,
+        msg_rx: Receiver<JsMessage>,
+        worker_tx: Sender<WorkerMsg>,
+    ) -> Self {
         Self {
             component: Textarea::default(),
             rx,
+            browser: Browser::new(msg_rx, worker_tx),
         }
     }
 }

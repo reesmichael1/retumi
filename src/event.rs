@@ -1,6 +1,3 @@
-use crate::browser;
-use crate::error::RetumiError;
-use crate::js::{JsMessage, WorkerMsg};
 use crate::ui::Msg;
 
 use crossbeam::channel::{Receiver, Sender};
@@ -20,25 +17,18 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    pub fn new(
-        rx: Receiver<Msg>,
-        tx: Sender<Result<String, RetumiError>>,
-        msg_rx: Receiver<JsMessage>,
-        worker_tx: Sender<WorkerMsg>,
-    ) -> Self {
+    pub fn new(rx: Receiver<Msg>, tx: Sender<String>) -> Self {
         let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel(16);
 
         {
-            let msg_rx = msg_rx.clone();
-            let worker_tx = worker_tx.clone();
             tokio::spawn(async move {
                 loop {
                     let msg = tok_rx.recv().await.unwrap();
                     match msg {
+                        // TODO: custom event type with only two options?
                         Msg::UrlSubmit(url) => {
-                            let page =
-                                browser::browse(url, msg_rx.clone(), worker_tx.clone()).await;
-                            tx.send(page).unwrap();
+                            let contents = reqwest::get(url).await.unwrap().text().await.unwrap();
+                            tx.send(contents).unwrap();
                         }
                         Msg::Quit => break,
                         _ => {}
