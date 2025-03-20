@@ -82,7 +82,7 @@ fn initialize_context(
     rx: Receiver<WorkerMsg>,
     tx: Sender<JsMessage>,
 ) -> Result<Context, RetumiError> {
-    log::info!("starting JavaScript engine initialization");
+    tracing::info!("starting JavaScript engine initialization");
     let mut ctx = Context::default();
 
     macro_rules! js_func {
@@ -110,7 +110,7 @@ fn initialize_context(
                 )
                 .map_err(|err| RetumiError::JsInitializeError(err.to_string()))?;
             }
-            log::info!("registered function for {}", $name);
+            tracing::info!("registered function for {}", $name);
         };
     }
 
@@ -185,7 +185,7 @@ fn initialize_context(
     ctx.eval(Source::from_bytes(runtime_js))
         .map_err(|err| RetumiError::JsInitializeError(err.to_string()))?;
 
-    log::info!("successfully initialized JavaScript engine");
+    tracing::info!("successfully initialized JavaScript engine");
     Ok(ctx)
 }
 
@@ -197,7 +197,7 @@ pub fn run_worker(rx: Receiver<WorkerMsg>, tx: Sender<JsMessage>) -> Result<(), 
         match &msg {
             WorkerMsg::Execute(src) => {
                 if let Err(err) = ctx.eval(Source::from_bytes(&src)) {
-                    log::error!("in JS execution: {err}");
+                    tracing::error!("in JS execution: {err}");
                 }
                 tx.send(JsMessage::Done)?;
             }
@@ -222,7 +222,7 @@ pub fn exec(
     code: String,
 ) {
     if let Err(err) = exec_raw(dom, js_state, rx, tx, code) {
-        log::error!("{err}");
+        tracing::error!("{err}");
     }
 }
 
