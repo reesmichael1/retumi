@@ -192,6 +192,9 @@ impl Browser {
         }
 
         self.dom = dom;
+        // Reset the rendering params so that we start with a clean page
+        self.current_link = None;
+        self.config.decorator = RetumiRenderer::new();
         self.render()
     }
 
