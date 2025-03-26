@@ -17,7 +17,7 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    pub fn new(rx: Receiver<Msg>, tx: Sender<String>) -> Self {
+    pub fn new(rx: Receiver<Msg>, tx: Sender<Option<String>>) -> Self {
         let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel(16);
 
         {
@@ -25,9 +25,13 @@ impl HttpClient {
                 loop {
                     let msg = tok_rx.recv().await.unwrap();
                     match msg {
-                        // TODO: custom event type with only two options?
                         Msg::UrlSubmit(url) => {
-                            let contents = reqwest::get(url).await.unwrap().text().await.unwrap();
+                            let contents = reqwest::get(url).await;
+                            let contents = match contents {
+                                Ok(c) => c.text().await.ok(),
+                                Err(_) => None,
+                            };
+                            // TODO: send an error type back for helpful error messages
                             tx.send(contents).unwrap();
                         }
                         Msg::Quit => break,
